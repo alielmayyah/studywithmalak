@@ -8,6 +8,7 @@ export type RoomData = { room: Room; profiles: Profile[]; sessions: StudySession
 export function useRoom(userId: string | null, history = false) {
   const [data, setData] = useState<RoomData | null>(null)
   const [online, setOnline] = useState<string[]>([])
+  const [presenceReady, setPresenceReady] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [connected, setConnected] = useState(navigator.onLine)
@@ -45,6 +46,7 @@ export function useRoom(userId: string | null, history = false) {
     const syncPresence = () => {
       const state = channel.presenceState<PresenceState>()
       setOnline([...new Set(Object.values(state).flatMap(items => items.map(item => item.user_id)))])
+      setPresenceReady(true)
     }
     const channel = supabase.channel(`room:${data.room.id}`, { config: { private: true, presence: { key: userId } } })
       .on('presence', { event: 'sync' }, syncPresence)
@@ -53,10 +55,33 @@ export function useRoom(userId: string | null, history = false) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_goals', filter: `room_id=eq.${data.room.id}` }, () => { void reload() })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'study_breaks' }, () => { void reload() })
       .subscribe(status => {
-        if (status === 'SUBSCRIBED') { setConnected(true); void channel.track({ user_id: userId, online_at: new Date().toISOString() }); void reload() }
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setConnected(false)
+        if (status === 'SUBSCRIBED') {
+          setConnected(true)
+          if (document.visibilityState === 'visible') void channel.track({ user_id: userId, online_at: new Date().toISOString() })
+          void reload()
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          setConnected(false)
+          setPresenceReady(false)
+        }
       })
-    return () => { void supabase.removeChannel(channel) }
+    const visibility = () => {
+      if (document.visibilityState === 'hidden') void channel.untrack()
+      else {
+        void channel.track({ user_id: userId, online_at: new Date().toISOString() })
+        void reload()
+      }
+    }
+    const leaving = () => { void channel.untrack() }
+    document.addEventListener('visibilitychange', visibility)
+    window.addEventListener('pagehide', leaving)
+    window.addEventListener('beforeunload', leaving)
+    return () => {
+      document.removeEventListener('visibilitychange', visibility)
+      window.removeEventListener('pagehide', leaving)
+      window.removeEventListener('beforeunload', leaving)
+      void channel.untrack().finally(() => { void supabase.removeChannel(channel) })
+    }
   }, [data?.room.id, userId, reload])
   useEffect(() => {
     const up = () => { setConnected(true); void reload() }
@@ -74,5 +99,5 @@ export function useRoom(userId: string | null, history = false) {
     schedule()
     return () => window.clearTimeout(timeout)
   }, [history, reload])
-  return { data, online, loading, error, connected, reload }
+  return { data, online, presenceReady, loading, error, connected, reload }
 }
