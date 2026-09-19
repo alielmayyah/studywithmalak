@@ -28,7 +28,7 @@ declare profile_uuid uuid; saved_hash text;
 begin
   if auth.uid() is null then raise exception 'Authentication required'; end if;
   select p.id, s.passcode_hash into profile_uuid, saved_hash from public.profiles p join private.identity_secrets s on s.profile_id = p.id where p.display_name = p_name;
-  if saved_hash is null or extensions.crypt(p_passcode, saved_hash) <> saved_hash then raise exception 'Invalid passcode'; end if;
+  if saved_hash is null or p_passcode is null or extensions.crypt(p_passcode, saved_hash) is distinct from saved_hash then raise exception 'Invalid passcode'; end if;
   insert into public.profile_access(auth_user_id, profile_id) values(auth.uid(), profile_uuid)
     on conflict(auth_user_id) do update set profile_id = excluded.profile_id;
   return profile_uuid;
