@@ -44,7 +44,7 @@ export function useTimerAlerts(
     return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0.4;
   });
   const [desktop, setDesktop] = useState(
-    () => read("study-desktop", "false") === "true",
+    () => read("study-desktop", "true") === "true",
   );
   const [permission, setPermission] = useState<
     NotificationPermission | "unsupported"
@@ -66,29 +66,23 @@ export function useTimerAlerts(
   timerRef.current = timer;
   const seen = useRef(new Set<string>());
 
-  // Check push subscription status on mount and auto-subscribe on first interaction
+  // Check push subscription status on mount and auto-subscribe if permission already granted
   useEffect(() => {
     if (pushChecked.current) return;
     pushChecked.current = true;
     void getPushStatus(userId).then((active) => {
       setPush(active);
-      if (active || !isPushSupported()) return;
-      // Auto-subscribe on the user's first interaction (required by browsers for permission prompt)
-      const autoSubscribe = async () => {
-        document.removeEventListener("pointerdown", autoSubscribe);
-        document.removeEventListener("keydown", autoSubscribe);
-        // If permission already granted, subscribe silently
-        // If not yet asked, the browser will prompt on subscribeToPush
-        if ("Notification" in window && Notification.permission === "denied") return;
-        const endpoint = await subscribeToPush(userId);
-        if (endpoint) setPush(true);
-      };
+      if (!isPushSupported()) return;
+
       if ("Notification" in window && Notification.permission === "granted") {
-        // Already granted — subscribe immediately, no gesture needed
-        void subscribeToPush(userId).then((ep) => { if (ep) setPush(true); });
-      } else {
-        document.addEventListener("pointerdown", autoSubscribe, { once: true });
-        document.addEventListener("keydown", autoSubscribe, { once: true });
+        // Permission is already granted — enable phone push notifications automatically!
+        void subscribeToPush(userId).then((ep) => {
+          if (ep) {
+            setPush(true);
+            setDesktop(true);
+            save("study-desktop", "true");
+          }
+        });
       }
     });
   }, [userId]);
@@ -217,6 +211,8 @@ export function useTimerAlerts(
     const endpoint = await subscribeToPush(userId);
     if (endpoint) {
       setPush(true);
+      setDesktop(true);
+      save("study-desktop", "true");
     } else {
       setPushError(
         Notification.permission === "denied"

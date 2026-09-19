@@ -139,21 +139,23 @@ export function RoomView({
     () => localStorage.getItem("study-quiet") === "true",
   );
   const [showIosGuide, setShowIosGuide] = useState(false);
-  const [showPushBanner, setShowPushBanner] = useState(false);
+  const [showPushModal, setShowPushModal] = useState(false);
   const isIosDevice = isIOS();
   const isStandaloneMode = isStandalone();
 
   useEffect(() => {
+    // If on iPhone in regular Safari, show the Home Screen guide modal
     if (isIosDevice && !isStandaloneMode) {
-      const dismissed = localStorage.getItem("study_dismissed_ios_guide");
+      const dismissed = sessionStorage.getItem("study_dismissed_ios_guide");
       if (!dismissed) {
-        const timer = setTimeout(() => setShowIosGuide(true), 1200);
+        const timer = setTimeout(() => setShowIosGuide(true), 600);
         return () => clearTimeout(timer);
       }
     } else if (alerts.pushSupported && !alerts.push) {
-      const dismissed = localStorage.getItem("study_dismissed_push_banner");
+      // If push is supported but not enabled, show the permission modal
+      const dismissed = sessionStorage.getItem("study_dismissed_push_modal");
       if (!dismissed) {
-        const timer = setTimeout(() => setShowPushBanner(true), 1500);
+        const timer = setTimeout(() => setShowPushModal(true), 700);
         return () => clearTimeout(timer);
       }
     }
@@ -161,12 +163,16 @@ export function RoomView({
 
   const dismissIosGuide = () => {
     setShowIosGuide(false);
-    localStorage.setItem("study_dismissed_ios_guide", "true");
+    try {
+      sessionStorage.setItem("study_dismissed_ios_guide", "true");
+    } catch {}
   };
 
-  const dismissPushBanner = () => {
-    setShowPushBanner(false);
-    localStorage.setItem("study_dismissed_push_banner", "true");
+  const dismissPushModal = () => {
+    setShowPushModal(false);
+    try {
+      sessionStorage.setItem("study_dismissed_push_modal", "true");
+    } catch {}
   };
 
   const profiles = [...data.profiles].sort((a, b) =>
@@ -789,38 +795,138 @@ export function RoomView({
         </div>
       )}
 
-      {showPushBanner && !alerts.push && alerts.pushSupported && (
-        <aside className="push-banner" aria-label="Notification setup prompt">
-          <div className="push-banner-header">
-            <h3 className="push-banner-title">
-              <Bell size={16} color="var(--accent)" /> Stay in sync
-            </h3>
-            <button
-              className="icon-button"
-              onClick={dismissPushBanner}
-              aria-label="Dismiss notification prompt"
-            >
-              <X size={16} />
-            </button>
+      {showPushModal && alerts.pushSupported && (
+        <div
+          className="modal-overlay"
+          onClick={dismissPushModal}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Turn on notifications"
+        >
+          <div className="ios-guide-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="ios-guide-header">
+              <div>
+                <h3 className="ios-guide-title">
+                  <Bell size={20} color="var(--accent)" /> Enable Phone Notifications
+                </h3>
+                <p className="ios-guide-subtitle">
+                  Stay in sync with {partner?.display_name || "your partner"}!
+                </p>
+              </div>
+              <button
+                className="icon-button"
+                onClick={dismissPushModal}
+                aria-label="Close dialog"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {alerts.push ? (
+              <div style={{ textAlign: "center", padding: "10px 0" }}>
+                <div
+                  style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: "50%",
+                    background: "rgba(74, 222, 128, 0.15)",
+                    border: "1px solid rgba(74, 222, 128, 0.3)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    margin: "0 auto 14px",
+                  }}
+                >
+                  <Check size={28} color="#4ade80" />
+                </div>
+                <h4
+                  style={{
+                    margin: "0 0 6px",
+                    fontSize: 17,
+                    color: "var(--text-primary)",
+                  }}
+                >
+                  Notifications Active!
+                </h4>
+                <p
+                  style={{
+                    margin: "0 0 16px",
+                    color: "var(--text-secondary)",
+                    fontSize: 13.5,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  You'll be notified on your lock screen whenever {partner?.display_name || "your partner"} starts studying.
+                </p>
+                <button
+                  className="primary"
+                  style={{ width: "100%", justifyContent: "center" }}
+                  onClick={dismissPushModal}
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <>
+                <p
+                  style={{
+                    fontSize: 13.5,
+                    color: "var(--text-secondary)",
+                    margin: "4px 0 10px 0",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Allow notifications so you’re alerted when{" "}
+                  <strong>{partner?.display_name || "your partner"}</strong>{" "}
+                  starts studying, or when your timer completes — even with your phone locked or browser closed.
+                </p>
+
+                {alerts.pushError && (
+                  <div
+                    className="test-push-feedback"
+                    style={{
+                      borderColor: "#f87171",
+                      color: "#fca5a5",
+                      marginBottom: 8,
+                    }}
+                  >
+                    {alerts.pushError}
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    marginTop: 4,
+                  }}
+                >
+                  <button
+                    className="primary"
+                    style={{
+                      width: "100%",
+                      justifyContent: "center",
+                      padding: "12px 16px",
+                    }}
+                    onClick={async () => {
+                      await alerts.togglePush();
+                    }}
+                  >
+                    <Bell size={16} /> Allow Notifications
+                  </button>
+                  <button
+                    className="secondary"
+                    style={{ width: "100%", justifyContent: "center" }}
+                    onClick={dismissPushModal}
+                  >
+                    Maybe later
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-          <p className="push-banner-desc">
-            Turn on notifications to get an alert when {partner?.display_name || "your partner"} starts studying or when your break ends.
-          </p>
-          <div className="push-banner-actions">
-            <button
-              className="primary"
-              onClick={async () => {
-                dismissPushBanner();
-                await alerts.togglePush();
-              }}
-            >
-              <Bell size={14} /> Turn on notifications
-            </button>
-            <button className="secondary" onClick={dismissPushBanner}>
-              Maybe later
-            </button>
-          </div>
-        </aside>
+        </div>
       )}
     </div>
   );
