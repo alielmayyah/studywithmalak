@@ -9,6 +9,7 @@ import {
   Pause,
   Play,
   Settings,
+  Smartphone,
   WifiOff,
   Bell,
   Volume2,
@@ -933,13 +934,34 @@ function RoomSettings({
                 ? "Disable desktop alerts"
                 : "Enable desktop alerts"}
             </button>
+            {alerts.pushSupported && (
+              <button
+                className="secondary"
+                onClick={() => void alerts.togglePush()}
+              >
+                <Smartphone size={14} />
+                {alerts.push
+                  ? "Disable phone notifications"
+                  : "Enable phone notifications"}
+              </button>
+            )}
             <p>
               {alerts.permission === "unsupported"
                 ? "Desktop notifications are not supported in this browser."
-                : "Desktop alerts work while this room is open. Closed-browser phone reminders need push setup."}
+                : alerts.push
+                  ? "Phone notifications are active. You\u2019ll be notified even after closing the browser."
+                  : "Desktop alerts work while this room is open. Enable phone notifications to get reminders after closing the browser."}
             </p>
+            {alerts.pushSupported && !alerts.push && (
+              <p className="push-hint">
+                On iPhone, first add the app to your Home Screen (Share → Add to Home Screen), then enable notifications.
+              </p>
+            )}
             {alerts.notificationError && (
               <p role="status">{alerts.notificationError}</p>
+            )}
+            {alerts.pushError && (
+              <p role="status">{alerts.pushError}</p>
             )}
           </div>
           <label>

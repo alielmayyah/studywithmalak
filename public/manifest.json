@@ -1,0 +1,23 @@
+{
+  "name": "Ali × Malak — Study Room",
+  "short_name": "StudyRoom",
+  "description": "A private Pomodoro study room for Ali and Malak.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#111b1a",
+  "background_color": "#111b1a",
+  "icons": [
+    {
+      "src": "avatars/ali.webp",
+      "sizes": "192x192",
+      "type": "image/webp"
+    },
+    {
+      "src": "avatars/malak.webp",
+      "sizes": "192x192",
+      "type": "image/webp"
+    }
+  ]
+}

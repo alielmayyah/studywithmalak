@@ -9,6 +9,12 @@ import {
 import type { TimerAlert } from "../lib/timerAlerts";
 import { formatCountdown } from "../lib/time";
 import { remaining } from "../lib/pomodoro";
+import {
+  getPushStatus,
+  pushSupported as isPushSupported,
+  subscribeToPush,
+  unsubscribeFromPush,
+} from "../lib/pushSubscription";
 
 function read(key: string, fallback: string) {
   try {
@@ -52,10 +58,40 @@ export function useTimerAlerts(
   const [returnReminder, setReturnReminder] = useState(
     () => deadline(timer) !== null && remaining(timer, now) > 0,
   );
+  const [push, setPush] = useState(false);
+  const [pushError, setPushError] = useState("");
+  const pushChecked = useRef(false);
   const previous = useRef(timer);
   const timerRef = useRef(timer);
   timerRef.current = timer;
   const seen = useRef(new Set<string>());
+
+  // Check push subscription status on mount and auto-subscribe on first interaction
+  useEffect(() => {
+    if (pushChecked.current) return;
+    pushChecked.current = true;
+    void getPushStatus(userId).then((active) => {
+      setPush(active);
+      if (active || !isPushSupported()) return;
+      // Auto-subscribe on the user's first interaction (required by browsers for permission prompt)
+      const autoSubscribe = async () => {
+        document.removeEventListener("pointerdown", autoSubscribe);
+        document.removeEventListener("keydown", autoSubscribe);
+        // If permission already granted, subscribe silently
+        // If not yet asked, the browser will prompt on subscribeToPush
+        if ("Notification" in window && Notification.permission === "denied") return;
+        const endpoint = await subscribeToPush(userId);
+        if (endpoint) setPush(true);
+      };
+      if ("Notification" in window && Notification.permission === "granted") {
+        // Already granted — subscribe immediately, no gesture needed
+        void subscribeToPush(userId).then((ep) => { if (ep) setPush(true); });
+      } else {
+        document.addEventListener("pointerdown", autoSubscribe, { once: true });
+        document.addEventListener("keydown", autoSubscribe, { once: true });
+      }
+    });
+  }, [userId]);
 
   useEffect(() => {
     const unlock = () => {
@@ -164,10 +200,29 @@ export function useTimerAlerts(
       save("study-desktop", String(result === "granted"));
       if (result === "denied")
         setNotificationError(
-          "Notifications are blocked. Allow them in your browser’s site settings, then try again.",
+          "Notifications are blocked. Allow them in your browser's site settings, then try again.",
         );
     } catch {
       setNotificationError("This browser cannot enable desktop notifications.");
+    }
+  }
+  async function togglePush() {
+    setPushError("");
+    if (push) {
+      const ok = await unsubscribeFromPush(userId);
+      if (ok) setPush(false);
+      else setPushError("Could not disable phone notifications.");
+      return;
+    }
+    const endpoint = await subscribeToPush(userId);
+    if (endpoint) {
+      setPush(true);
+    } else {
+      setPushError(
+        Notification.permission === "denied"
+          ? "Notifications are blocked. Allow them in your browser's site settings, then try again."
+          : "Could not enable phone notifications. On iPhone, add the app to your Home Screen first.",
+      );
     }
   }
   return {
@@ -178,6 +233,10 @@ export function useTimerAlerts(
     desktop: desktop && permission === "granted",
     permission,
     toggleDesktop,
+    push,
+    pushSupported: isPushSupported(),
+    togglePush,
+    pushError,
     notificationError,
     notice,
     dismissNotice: () => setNotice(null),
