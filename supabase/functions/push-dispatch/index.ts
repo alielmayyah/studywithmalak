@@ -237,6 +237,56 @@ Deno.serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
     const { privateKey } = await importVapidKeys();
 
+    let reqBody: any = {};
+    try {
+      reqBody = await req.json();
+    } catch {
+      reqBody = {};
+    }
+
+    // Handle test notification request
+    if (reqBody?.action === "test") {
+      const targetProfileId = reqBody.profile_id;
+      if (!targetProfileId) {
+        return new Response(JSON.stringify({ error: "profile_id required" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: subscriptions } = await supabase
+        .from("push_subscriptions")
+        .select("id, endpoint, p256dh, auth")
+        .eq("profile_id", targetProfileId);
+
+      if (!subscriptions || subscriptions.length === 0) {
+        return new Response(
+          JSON.stringify({ sent: 0, error: "No active phone subscription found on this device." }),
+          { status: 404, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      let sent = 0;
+      for (const sub of subscriptions) {
+        try {
+          const payload = JSON.stringify({
+            title: "Study with Malak ✨",
+            body: "Notifications are working! You'll get alerts when studying starts or timers finish.",
+            icon: "avatars/malak.webp",
+            tag: `test-push-${Date.now()}`,
+          });
+          const res = await sendPushNotification(sub, payload, privateKey);
+          if (res.ok || res.status === 201) sent++;
+        } catch (e) {
+          console.error("Test notification error:", e);
+        }
+      }
+
+      return new Response(JSON.stringify({ sent, success: true }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     // Query due timer notifications
     const { data: dueNotifications, error: queryError } = await supabase.rpc(
       "due_push_notifications",

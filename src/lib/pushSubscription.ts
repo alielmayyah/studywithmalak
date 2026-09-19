@@ -139,3 +139,55 @@ export async function getPushStatus(profileId: string): Promise<boolean> {
     return false;
   }
 }
+
+/** Check if running on an iOS device (iPhone, iPad, iPod). */
+export function isIOS(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
+/** Check if running in standalone display mode (added to Home Screen). */
+export function isStandalone(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  return (
+    Boolean((navigator as unknown as { standalone?: boolean }).standalone) ||
+    window.matchMedia("(display-mode: standalone)").matches
+  );
+}
+
+/** Trigger an immediate test push notification to this user's subscribed devices. */
+export async function sendTestNotification(
+  profileId: string,
+): Promise<{ success: boolean; message?: string }> {
+  try {
+    const { data, error } = await supabase.functions.invoke("push-dispatch", {
+      body: { action: "test", profile_id: profileId },
+    });
+    if (error) {
+      return { success: false, message: error.message || "Failed to send test notification." };
+    }
+    if (data?.error) {
+      return { success: false, message: data.error };
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, message: String(e) };
+  }
+}
+
+/** Check if the other room member has registered at least one push device. */
+export async function getPartnerPushStatus(roomId: string): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.rpc("partner_push_status", {
+      p_room: roomId,
+    });
+    if (error) return false;
+    return Boolean(data);
+  } catch {
+    return false;
+  }
+}
+

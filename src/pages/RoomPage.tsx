@@ -15,6 +15,9 @@ import {
   Volume2,
   VolumeX,
   X,
+  Share2,
+  PlusSquare,
+  Send,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useRoom } from "../hooks/useRoom";
@@ -32,6 +35,12 @@ import {
 import { currentOverlap, remaining, isFocusing } from "../lib/pomodoro";
 import { supabase } from "../lib/supabase";
 import { avatarUrl } from "../lib/avatars";
+import {
+  isIOS,
+  isStandalone,
+  sendTestNotification,
+  getPartnerPushStatus,
+} from "../lib/pushSubscription";
 import type { PomodoroState, Profile, UserStatus } from "../lib/types";
 import "./room.css";
 
@@ -129,6 +138,37 @@ export function RoomView({
   const [quiet, setQuiet] = useState(
     () => localStorage.getItem("study-quiet") === "true",
   );
+  const [showIosGuide, setShowIosGuide] = useState(false);
+  const [showPushBanner, setShowPushBanner] = useState(false);
+  const isIosDevice = isIOS();
+  const isStandaloneMode = isStandalone();
+
+  useEffect(() => {
+    if (isIosDevice && !isStandaloneMode) {
+      const dismissed = localStorage.getItem("study_dismissed_ios_guide");
+      if (!dismissed) {
+        const timer = setTimeout(() => setShowIosGuide(true), 1200);
+        return () => clearTimeout(timer);
+      }
+    } else if (alerts.pushSupported && !alerts.push) {
+      const dismissed = localStorage.getItem("study_dismissed_push_banner");
+      if (!dismissed) {
+        const timer = setTimeout(() => setShowPushBanner(true), 1500);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [isIosDevice, isStandaloneMode, alerts.pushSupported, alerts.push]);
+
+  const dismissIosGuide = () => {
+    setShowIosGuide(false);
+    localStorage.setItem("study_dismissed_ios_guide", "true");
+  };
+
+  const dismissPushBanner = () => {
+    setShowPushBanner(false);
+    localStorage.setItem("study_dismissed_push_banner", "true");
+  };
+
   const profiles = [...data.profiles].sort((a, b) =>
     a.display_name.localeCompare(b.display_name),
   );
@@ -318,6 +358,10 @@ export function RoomView({
               setQuiet(value);
               localStorage.setItem("study-quiet", String(value));
             }}
+            userId={userId}
+            roomId={data.room.id}
+            partnerName={partner?.display_name || "Partner"}
+            onOpenIosGuide={() => setShowIosGuide(true)}
           />
           <button
             className="icon-button"
@@ -668,6 +712,116 @@ export function RoomView({
           </div>
         )}
       </div>
+
+      {showIosGuide && (
+        <div
+          className="modal-overlay"
+          onClick={dismissIosGuide}
+          role="dialog"
+          aria-modal="true"
+          aria-label="iPhone notification setup guide"
+        >
+          <div className="ios-guide-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="ios-guide-header">
+              <div>
+                <h3 className="ios-guide-title">
+                  <Smartphone size={20} color="var(--malak-soft)" /> Enable on iPhone
+                </h3>
+                <p className="ios-guide-subtitle">
+                  Get notified when {partner?.display_name || "your partner"} starts studying, even with your phone locked.
+                </p>
+              </div>
+              <button
+                className="icon-button"
+                onClick={dismissIosGuide}
+                aria-label="Close guide"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="ios-step-list">
+              <div className="ios-step-item">
+                <div className="ios-step-badge">1</div>
+                <div className="ios-step-content">
+                  <p className="ios-step-title">
+                    <Share2 size={16} /> Tap the Share button
+                  </p>
+                  <p className="ios-step-desc">
+                    In Safari’s bottom toolbar, tap the <strong>Share</strong> icon (square with arrow pointing up).
+                  </p>
+                </div>
+              </div>
+
+              <div className="ios-step-item">
+                <div className="ios-step-badge">2</div>
+                <div className="ios-step-content">
+                  <p className="ios-step-title">
+                    <PlusSquare size={16} /> Tap "Add to Home Screen"
+                  </p>
+                  <p className="ios-step-desc">
+                    Scroll down and select <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>.
+                  </p>
+                </div>
+              </div>
+
+              <div className="ios-step-item">
+                <div className="ios-step-badge">3</div>
+                <div className="ios-step-content">
+                  <p className="ios-step-title">
+                    <Bell size={16} /> Open & Turn On Alerts
+                  </p>
+                  <p className="ios-step-desc">
+                    Open <strong>Study with Malak</strong> from your Home Screen and tap <strong>Allow</strong> when prompted!
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <button
+              className="primary"
+              onClick={dismissIosGuide}
+              style={{ width: "100%", justifyContent: "center" }}
+            >
+              Got it!
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showPushBanner && !alerts.push && alerts.pushSupported && (
+        <aside className="push-banner" aria-label="Notification setup prompt">
+          <div className="push-banner-header">
+            <h3 className="push-banner-title">
+              <Bell size={16} color="var(--accent)" /> Stay in sync
+            </h3>
+            <button
+              className="icon-button"
+              onClick={dismissPushBanner}
+              aria-label="Dismiss notification prompt"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <p className="push-banner-desc">
+            Turn on notifications to get an alert when {partner?.display_name || "your partner"} starts studying or when your break ends.
+          </p>
+          <div className="push-banner-actions">
+            <button
+              className="primary"
+              onClick={async () => {
+                dismissPushBanner();
+                await alerts.togglePush();
+              }}
+            >
+              <Bell size={14} /> Turn on notifications
+            </button>
+            <button className="secondary" onClick={dismissPushBanner}>
+              Maybe later
+            </button>
+          </div>
+        </aside>
+      )}
     </div>
   );
 }
@@ -850,23 +1004,60 @@ function RoomSettings({
   quiet,
   setQuiet,
   alerts,
+  userId,
+  roomId,
+  partnerName,
+  onOpenIosGuide,
 }: {
   quiet: boolean;
   setQuiet: (value: boolean) => void;
   alerts: ReturnType<typeof useTimerAlerts>;
+  userId: string;
+  roomId: string;
+  partnerName: string;
+  onOpenIosGuide: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [partnerPushActive, setPartnerPushActive] = useState<boolean | null>(
+    null,
+  );
+  const [testPushLoading, setTestPushLoading] = useState(false);
+  const [testPushFeedback, setTestPushFeedback] = useState("");
+  const isIosDevice = isIOS();
+  const isStandaloneMode = isStandalone();
+
   const wrap = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+
   useEffect(() => {
     if (!open) return;
+    void getPartnerPushStatus(roomId).then(setPartnerPushActive);
+    setTestPushFeedback("");
     const outside = (event: PointerEvent) => {
       if (!wrap.current?.contains(event.target as Node)) setOpen(false);
     };
     document.addEventListener("pointerdown", outside);
     wrap.current?.querySelector("input")?.focus();
     return () => document.removeEventListener("pointerdown", outside);
-  }, [open]);
+  }, [open, roomId]);
+
+  const handleSendTest = async () => {
+    setTestPushLoading(true);
+    setTestPushFeedback("");
+    try {
+      const res = await sendTestNotification(userId);
+      if (res.success) {
+        setTestPushFeedback("✨ Test alert sent! Lock your screen to check it.");
+      } else {
+        setTestPushFeedback(res.message || "Failed to send test alert.");
+      }
+    } catch {
+      setTestPushFeedback("Failed to send test alert.");
+    } finally {
+      setTestPushLoading(false);
+    }
+  };
+
   return (
     <div
       className="settings-wrap"
@@ -937,6 +1128,24 @@ function RoomSettings({
                 ? "Disable desktop alerts"
                 : "Enable desktop alerts"}
             </button>
+
+            {isIosDevice && !isStandaloneMode && (
+              <div style={{ marginBottom: 10 }}>
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    setOpen(false);
+                    onOpenIosGuide();
+                  }}
+                >
+                  <Smartphone size={14} /> iPhone setup instructions
+                </button>
+                <p className="push-hint" style={{ margin: "4px 0 0" }}>
+                  On iPhone, Apple requires saving to your Home Screen before notifications can be turned on.
+                </p>
+              </div>
+            )}
+
             {alerts.pushSupported && (
               <button
                 className="secondary"
@@ -948,18 +1157,61 @@ function RoomSettings({
                   : "Enable phone notifications"}
               </button>
             )}
+
+            {alerts.push && (
+              <div style={{ marginTop: 8, marginBottom: 8 }}>
+                <button
+                  className="secondary"
+                  disabled={testPushLoading}
+                  onClick={() => void handleSendTest()}
+                >
+                  <Send size={14} />
+                  {testPushLoading ? "Sending test..." : "Send test notification"}
+                </button>
+                {testPushFeedback && (
+                  <div className="test-push-feedback">{testPushFeedback}</div>
+                )}
+              </div>
+            )}
+
             <p>
               {alerts.permission === "unsupported"
                 ? "Desktop notifications are not supported in this browser."
                 : alerts.push
-                  ? "Phone notifications are active. You\u2019ll be notified even after closing the browser."
+                  ? "Phone notifications are active. You\u2019ll be notified even after closing the browser or locking your phone."
                   : "Desktop alerts work while this room is open. Enable phone notifications to get reminders after closing the browser."}
             </p>
-            {alerts.pushSupported && !alerts.push && (
-              <p className="push-hint">
-                On iPhone, first add the app to your Home Screen (Share → Add to Home Screen), then enable notifications.
+
+            <div className="partner-status-box">
+              <div className="partner-status-row">
+                <span>
+                  <strong>{partnerName}’s device:</strong>
+                </span>
+                <span style={{ display: "flex", alignItems: "center" }}>
+                  <span
+                    className={`status-dot ${partnerPushActive ? "active" : "inactive"}`}
+                  />
+                  {partnerPushActive === null
+                    ? "Checking..."
+                    : partnerPushActive
+                      ? "Alerts active"
+                      : "Not set up yet"}
+                </span>
+              </div>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 11.5,
+                  color: "var(--text-muted)",
+                  lineHeight: 1.35,
+                }}
+              >
+                {partnerPushActive
+                  ? `✨ ${partnerName} will get an alert whenever you start studying.`
+                  : `${partnerName} hasn’t enabled phone notifications yet.`}
               </p>
-            )}
+            </div>
+
             {alerts.notificationError && (
               <p role="status">{alerts.notificationError}</p>
             )}
