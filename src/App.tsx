@@ -50,6 +50,17 @@ export default function App() {
     const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => { void load(next) })
     return () => { mounted = false; listener.subscription.unsubscribe() }
   }, [])
+  useEffect(() => {
+    if (!session || !profileId) return
+    const checkAccess = async () => {
+      const { data, error } = await supabase.from('profile_access').select('profile_id').eq('auth_user_id', session.user.id).maybeSingle()
+      if (!error && data?.profile_id !== profileId) setProfileId(null)
+    }
+    const onVisible = () => { if (document.visibilityState === 'visible') void checkAccess() }
+    const timer = window.setInterval(() => { void checkAccess() }, 30000)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
+  }, [session, profileId])
   if (!ready) return <div className="loading-screen">Opening your room…</div>
   if (!profileId) return <SignIn session={session} onUnlocked={setProfileId} />
   return <Routes><Route path="/" element={<RoomPage userId={profileId}/>} /><Route path="/history" element={<HistoryPage userId={profileId}/>} /><Route path="*" element={<Navigate to="/" replace/>}/></Routes>
