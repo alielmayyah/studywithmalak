@@ -239,6 +239,9 @@ export function RoomView({
       } else await run(action);
       await reload();
       alerts.dismissReturn();
+      if (action === "start" || action === "back_to_focus") {
+        supabase.functions.invoke("push-dispatch").catch(() => {});
+      }
     } catch {
       setActionError("Could not save that change. Please try again.");
       await reload();

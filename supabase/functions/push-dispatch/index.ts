@@ -237,7 +237,7 @@ Deno.serve(async (req) => {
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
     const { privateKey } = await importVapidKeys();
 
-    // Query due notifications
+    // Query due timer notifications
     const { data: dueNotifications, error: queryError } = await supabase.rpc(
       "due_push_notifications",
     );
@@ -250,7 +250,19 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (!dueNotifications || dueNotifications.length === 0) {
+    // Query partner start notifications
+    const { data: partnerStarts, error: partnerError } = await supabase.rpc(
+      "partner_start_notifications",
+    );
+
+    if (partnerError) {
+      console.warn("Partner query warning:", partnerError);
+    }
+
+    const timerCount = dueNotifications?.length || 0;
+    const partnerCount = partnerStarts?.length || 0;
+
+    if (timerCount === 0 && partnerCount === 0) {
       return new Response(JSON.stringify({ sent: 0 }), {
         headers: { "Content-Type": "application/json" },
       });
@@ -259,64 +271,125 @@ Deno.serve(async (req) => {
     let sent = 0;
     let removed = 0;
 
-    for (const notification of dueNotifications) {
-      const title =
-        notification.phase === "focus"
-          ? "Focus complete. Take a breath."
-          : "Your break is over.";
-      const body =
-        notification.phase === "focus"
-          ? "Your focus time is saved. Time for a little rest."
-          : "Ready for another focus session?";
+    if (dueNotifications) {
+      for (const notification of dueNotifications) {
+        const title =
+          notification.phase === "focus"
+            ? "Focus complete. Take a breath."
+            : "Your break is over.";
+        const body =
+          notification.phase === "focus"
+            ? "Your focus time is saved. Time for a little rest."
+            : "Ready for another focus session?";
 
-      const payload = JSON.stringify({ title, body, tag: `${notification.profile_id}:${notification.phase}:${notification.deadline_at}` });
+        const payload = JSON.stringify({
+          title,
+          body,
+          tag: `${notification.profile_id}:${notification.phase}:${notification.deadline_at}`,
+        });
 
-      // Get all subscriptions for this user
-      const { data: subscriptions } = await supabase
-        .from("push_subscriptions")
-        .select("id, endpoint, p256dh, auth")
-        .eq("profile_id", notification.profile_id);
+        // Get all subscriptions for this user
+        const { data: subscriptions } = await supabase
+          .from("push_subscriptions")
+          .select("id, endpoint, p256dh, auth")
+          .eq("profile_id", notification.profile_id);
 
-      if (!subscriptions || subscriptions.length === 0) continue;
+        if (!subscriptions || subscriptions.length === 0) continue;
 
-      for (const sub of subscriptions) {
-        try {
-          const response = await sendPushNotification(
-            { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
-            payload,
-            privateKey,
-          );
+        for (const sub of subscriptions) {
+          try {
+            const response = await sendPushNotification(
+              { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
+              payload,
+              privateKey,
+            );
 
-          if (response.status === 410 || response.status === 404) {
-            // Subscription expired — remove it
-            await supabase
-              .from("push_subscriptions")
-              .delete()
-              .eq("id", sub.id);
-            removed++;
-          } else if (response.ok || response.status === 201) {
-            sent++;
-          } else {
-            console.warn(`Push to ${sub.endpoint} failed: ${response.status}`);
+            if (response.status === 410 || response.status === 404) {
+              // Subscription expired — remove it
+              await supabase
+                .from("push_subscriptions")
+                .delete()
+                .eq("id", sub.id);
+              removed++;
+            } else if (response.ok || response.status === 201) {
+              sent++;
+            } else {
+              console.warn(`Push to ${sub.endpoint} failed: ${response.status}`);
+            }
+          } catch (pushError) {
+            console.error(`Push error for ${sub.endpoint}:`, pushError);
           }
-        } catch (pushError) {
-          console.error(`Push error for ${sub.endpoint}:`, pushError);
         }
-      }
 
-      // Log delivery to prevent duplicates
-      await supabase.rpc("log_push_delivery", {
-        p_profile_id: notification.profile_id,
-        p_phase: notification.phase,
-        p_deadline_at: notification.deadline_at,
-      });
+        // Log delivery to prevent duplicates
+        await supabase.rpc("log_push_delivery", {
+          p_profile_id: notification.profile_id,
+          p_phase: notification.phase,
+          p_deadline_at: notification.deadline_at,
+        });
+      }
+    }
+
+    if (partnerStarts) {
+      for (const notification of partnerStarts) {
+        const starterName = notification.starter_name || "Your partner";
+        const isMalak = /malak/i.test(starterName);
+        const title = `${starterName} just started studying! 📚`;
+        const body = "Hop into the study room to join them.";
+        const icon = isMalak ? "avatars/malak.webp" : "avatars/ali.webp";
+
+        const payload = JSON.stringify({
+          title,
+          body,
+          icon,
+          tag: `partner-start:${notification.notify_profile_id}:${notification.started_at}`,
+        });
+
+        const { data: subscriptions } = await supabase
+          .from("push_subscriptions")
+          .select("id, endpoint, p256dh, auth")
+          .eq("profile_id", notification.notify_profile_id);
+
+        if (!subscriptions || subscriptions.length === 0) continue;
+
+        for (const sub of subscriptions) {
+          try {
+            const response = await sendPushNotification(
+              { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
+              payload,
+              privateKey,
+            );
+
+            if (response.status === 410 || response.status === 404) {
+              await supabase
+                .from("push_subscriptions")
+                .delete()
+                .eq("id", sub.id);
+              removed++;
+            } else if (response.ok || response.status === 201) {
+              sent++;
+            } else {
+              console.warn(`Push to ${sub.endpoint} failed: ${response.status}`);
+            }
+          } catch (pushError) {
+            console.error(`Push error for ${sub.endpoint}:`, pushError);
+          }
+        }
+
+        // Log delivery to prevent duplicates
+        await supabase.rpc("log_push_delivery", {
+          p_profile_id: notification.notify_profile_id,
+          p_phase: "partner_start",
+          p_deadline_at: notification.started_at,
+        });
+      }
     }
 
     // Clean up old push log entries (older than 1 hour)
     await supabase.rpc("cleanup_push_log");
 
     return new Response(
-      JSON.stringify({ sent, removed, processed: dueNotifications.length }),
+      JSON.stringify({ sent, removed, timerCount, partnerCount }),
       { headers: { "Content-Type": "application/json" } },
     );
   } catch (err) {

@@ -18,11 +18,12 @@ self.addEventListener("push", (event) => {
     data = { title: "Study Room", body: event.data.text() };
   }
   const title = data.title || "Study Room";
+  const icon = data.icon || "avatars/ali.webp";
   const options = {
     body: data.body || "",
     tag: data.tag || "study-push",
-    icon: "avatars/ali.webp",
-    badge: "avatars/ali.webp",
+    icon,
+    badge: data.badge || icon,
     renotify: true,
     requireInteraction: false,
     data: { url: self.registration.scope },
