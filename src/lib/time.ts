@@ -2,9 +2,9 @@ import type { StudyBreak, StudySession } from './types'
 
 export type Interval = { start: number; end: number }
 
-export function activeIntervals(session: StudySession, breaks: StudyBreak[], now: number, range?: Interval): Interval[] {
+export function activeIntervals(session: StudySession, breaks: StudyBreak[], now: number, range?: Interval, capEnd?: number): Interval[] {
   const start = Math.max(Date.parse(session.started_at), range?.start ?? -Infinity)
-  const end = Math.min(session.ended_at ? Date.parse(session.ended_at) : now, range?.end ?? Infinity)
+  const end = Math.min(session.ended_at ? Date.parse(session.ended_at) : now, range?.end ?? Infinity, capEnd ?? Infinity)
   if (end <= start) return []
   const ordered = breaks.filter(b => b.session_id === session.id).map(b => ({
     start: Math.max(start, Date.parse(b.started_at)),
@@ -40,6 +40,15 @@ export function formatClock(ms: number): string {
 export function formatShort(ms: number): string {
   const minutes = Math.floor(Math.max(0, ms) / 60000)
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
+}
+export function formatMinutes(ms: number): string {
+  if (ms > 0 && ms < 60000) return '<1 min'
+  const minutes = Math.floor(Math.max(0, ms) / 60000)
+  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
+}
+export function formatCountdown(ms: number): string {
+  const seconds = Math.ceil(Math.max(0, ms) / 1000)
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 export function localDayRange(now: Date): Interval {
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()

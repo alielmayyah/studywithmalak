@@ -2,8 +2,7 @@
 @import 'tailwindcss';
 /* Ali's desk uses quiet midnight blues. */
 .theme-ali{--bg:#101c29;--panel:#1b2d3d;--line:#3a5368;--muted:#a9bfd0;--accent:#c9e6ff;color:#edf6fc}
-.theme-ali.app-shell{background:linear-gradient(110deg,#0b172ac7,#102b4bb5),url('/ali-starry-night.webp') center center/cover fixed}
-.theme-ali.sign-in{background:linear-gradient(110deg,#0b172ac7,#102b4bb5),url('/ali-starry-night.webp') center center/cover fixed}
+.theme-ali.app-shell,.theme-ali.sign-in{background:#151922}
 .theme-ali .site-header{border-color:#c9e6ff20}
 .theme-ali .person-card{background:#1c3041;border-color:#c9e6ff1c}.theme-ali .person-card.studying{background:#25445c}
 .theme-ali .action-panel,.theme-ali .summary-panel{background:#192a39;border-color:#c9e6ff1c}
@@ -15,9 +14,8 @@
 .theme-ali .secondary{border-color:#68849a;color:#eef7fc}.theme-ali .start-form input,.theme-ali input,.theme-ali .goal-edit input{background:#102130;border-color:#5d7890;color:#f1f8fd}.theme-ali input::placeholder{color:#8faec3}
 .theme-ali .progress{background:#3f6077}.theme-ali .identity-button{background:#1d3346;border-color:#55748b}.theme-ali .identity-button.selected{background:#2b506c;border-color:#c9e6ff}.theme-ali .history-empty{background:#1b2d3d}
 /* Malak's desk keeps the shared layout while changing the atmosphere. */
-.theme-malak{--bg:#33232e;--panel:#513543;--line:#8c6472;--muted:#ead0d8;--accent:#ffe2e9;color:#fff5f6;background:linear-gradient(110deg,#281b29b8,#4a2633a0),url('/malak-blossoms.webp') center center/cover fixed}
-.theme-malak.app-shell{background:linear-gradient(110deg,#281b29bf,#4a2633a5),url('/malak-blossoms.webp') center center/cover fixed}
-.theme-malak.sign-in{background:linear-gradient(110deg,#281b29a8,#4a263380),url('/malak-blossoms.webp') center center/cover fixed}
+.theme-malak{--bg:#151922;--panel:#1e2430;--line:#ffffff18;--muted:#a7adbb;--accent:#f2b9ca;color:#f4f4f5;background:#151922}
+.theme-malak.app-shell,.theme-malak.sign-in{background:#151922}
 .theme-malak .site-header{background:#3b2633aa;border-color:#ffe2e929}
 .theme-malak .person-card{background:#513543e8;border-color:#ffdce442;box-shadow:0 12px 40px #30152226}
 .theme-malak .person-card.studying{background:#63404ce8}
