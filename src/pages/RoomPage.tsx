@@ -10,11 +10,16 @@ import {
   Play,
   Settings,
   WifiOff,
+  Bell,
+  Volume2,
+  VolumeX,
+  X,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useRoom } from "../hooks/useRoom";
 import type { RoomData } from "../hooks/useRoom";
 import { useClock } from "../hooks/useClock";
+import { useTimerAlerts } from "../hooks/useTimerAlerts";
 import {
   activeIntervals,
   calculateOverlap,
@@ -104,6 +109,7 @@ export function RoomView({
   const commandPending = useRef(false);
   const [actionError, setActionError] = useState("");
   const ownTimer = data.timers.find((t) => t.user_id === userId);
+  const alerts = useTimerAlerts(ownTimer, now, userId);
   const [preset, setPreset] = useState(() => {
     const f = ownTimer?.focus_minutes ?? 25,
       b = ownTimer?.break_minutes ?? 5;
@@ -231,6 +237,7 @@ export function RoomView({
         await run("start");
       } else await run(action);
       await reload();
+      alerts.dismissReturn();
     } catch {
       setActionError("Could not save that change. Please try again.");
       await reload();
@@ -301,6 +308,7 @@ export function RoomView({
             <History size={18} />
           </Link>
           <RoomSettings
+            alerts={alerts}
             quiet={quiet}
             setQuiet={(value) => {
               setQuiet(value);
@@ -328,6 +336,33 @@ export function RoomView({
         </div>
       )}
       <main className="room-main">
+        {alerts.returnReminder && (
+          <section
+            className="timer-reminder"
+            aria-label="Running timer reminder"
+          >
+            <Bell size={18} aria-hidden="true" />
+            <div>
+              <strong>
+                Your {onBreak ? "break" : "focus"} timer is still running.
+              </strong>
+              <p>
+                It kept counting while you were away. Continue or end the
+                session.
+              </p>
+            </div>
+            <button className="secondary" onClick={alerts.dismissReturn}>
+              Continue
+            </button>
+            <button
+              className="text-button"
+              disabled={busy || !connected}
+              onClick={() => void command("end")}
+            >
+              End session
+            </button>
+          </section>
+        )}
         <section className="room-heading">
           <div className="eyebrow">OUR STUDY ROOM</div>
           <h1>
@@ -396,6 +431,27 @@ export function RoomView({
               <img src={avatarUrl(me.display_name)} alt="" />
               {me.display_name}’s time
             </span>
+          </div>
+          <div className="timer-awareness">
+            <span>
+              {idle
+                ? "Ready when you are"
+                : paused
+                  ? "Timer paused"
+                  : timeLeft <= 0
+                    ? "Session complete"
+                    : `${onBreak ? "Break" : "Focus"} timer running`}
+            </span>
+            <button
+              className="icon-button"
+              aria-label={
+                alerts.sound ? "Mute timer sounds" : "Enable timer sounds"
+              }
+              aria-pressed={alerts.sound}
+              onClick={() => alerts.setSound(!alerts.sound)}
+            >
+              {alerts.sound ? <Volume2 size={16} /> : <VolumeX size={16} />}
+            </button>
           </div>
           <div className="timer-content">
             <div
@@ -494,6 +550,11 @@ export function RoomView({
                       ? "Rest your eyes. Come back when you’re ready."
                       : `${ownTimer.focus_minutes} minutes of focus, then ${ownTimer.break_minutes} minutes to breathe.`}
               </p>
+              {!idle && !paused && (
+                <p className="timer-away-note">
+                  Closing the browser does not stop your timer.
+                </p>
+              )}
               <div className="timer-actions">
                 <button
                   className="primary"
@@ -580,6 +641,29 @@ export function RoomView({
         </section>
         <footer className="room-footer">Same goals. Brighter days.</footer>
       </main>
+      <div
+        className="timer-toast-region"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {alerts.notice && (
+          <div className="timer-toast">
+            <Bell size={18} aria-hidden="true" />
+            <div>
+              <strong>{alerts.notice.title}</strong>
+              <p>{alerts.notice.body}</p>
+            </div>
+            <button
+              className="icon-button"
+              aria-label="Dismiss timer notification"
+              onClick={alerts.dismissNotice}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -643,6 +727,13 @@ function Person({
         </h2>
         <div className="presence-label">
           {online === null ? "Connecting…" : online ? "Online" : "Offline"}
+          {online === false &&
+            timer?.run_state === "running" &&
+            remaining(timer, now) > 0 && (
+              <span className="offline-timer-note">
+                {timer.phase === "break" ? "Break" : "Focus"} timer running
+              </span>
+            )}
         </div>
       </div>
       <div
@@ -754,9 +845,11 @@ function Person({
 function RoomSettings({
   quiet,
   setQuiet,
+  alerts,
 }: {
   quiet: boolean;
   setQuiet: (value: boolean) => void;
+  alerts: ReturnType<typeof useTimerAlerts>;
 }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -799,6 +892,56 @@ function RoomSettings({
         <div className="settings-popover" id="room-settings">
           <h2>Make yourself at home.</h2>
           <p>A small preference for this device.</p>
+          <div className="alert-settings">
+            <label>
+              <input
+                type="checkbox"
+                checked={alerts.sound}
+                onChange={(event) => alerts.setSound(event.target.checked)}
+              />{" "}
+              Timer sounds
+            </label>
+            <label className="volume-label">
+              Volume
+              <input
+                aria-label="Timer sound volume"
+                type="range"
+                min="0"
+                max="1"
+                step=".05"
+                value={alerts.volume}
+                disabled={!alerts.sound}
+                onChange={(event) =>
+                  alerts.setVolume(Number(event.target.value))
+                }
+              />
+            </label>
+            <button
+              className="secondary"
+              disabled={!alerts.sound}
+              onClick={alerts.testSound}
+            >
+              <Volume2 size={14} /> Test sound
+            </button>
+            <button
+              className="secondary"
+              disabled={alerts.permission === "unsupported"}
+              onClick={() => void alerts.toggleDesktop()}
+            >
+              <Bell size={14} />
+              {alerts.desktop
+                ? "Disable desktop alerts"
+                : "Enable desktop alerts"}
+            </button>
+            <p>
+              {alerts.permission === "unsupported"
+                ? "Desktop notifications are not supported in this browser."
+                : "Desktop alerts work while this room is open. Closed-browser phone reminders need push setup."}
+            </p>
+            {alerts.notificationError && (
+              <p role="status">{alerts.notificationError}</p>
+            )}
+          </div>
           <label>
             <input
               type="checkbox"
@@ -812,14 +955,11 @@ function RoomSettings({
             onClick={(event) => {
               event.preventDefault();
               setOpen(false);
-              document
-                .getElementById("pomodoro")
-                ?.scrollIntoView({
-                  behavior: matchMedia("(prefers-reduced-motion: reduce)")
-                    .matches
-                    ? "instant"
-                    : "smooth",
-                });
+              document.getElementById("pomodoro")?.scrollIntoView({
+                behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+                  ? "instant"
+                  : "smooth",
+              });
             }}
           >
             Change your timer below ↓

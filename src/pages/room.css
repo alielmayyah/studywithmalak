@@ -747,3 +747,126 @@
 .person-card:has([aria-expanded="true"]) {
   z-index: 6;
 }
+.timer-reminder,
+.timer-toast {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg-surface-2);
+  color: var(--text-primary);
+}
+.timer-reminder {
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.timer-reminder > div,
+.timer-toast > div {
+  flex: 1;
+  min-width: 180px;
+}
+.timer-reminder strong,
+.timer-toast strong {
+  font-size: 14px;
+  font-weight: 500;
+}
+.timer-reminder p,
+.timer-toast p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-top: 4px;
+}
+.timer-reminder > svg,
+.timer-toast > svg {
+  color: var(--accent);
+  flex: none;
+}
+.timer-awareness {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  color: var(--accent-soft);
+  font-size: 12px;
+}
+.timer-awareness .icon-button {
+  width: 32px;
+  height: 32px;
+}
+.timer-away-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: -8px 0 16px;
+}
+.offline-timer-note {
+  display: block;
+  color: var(--person);
+  font-size: 11px;
+  margin-top: 4px;
+}
+.timer-toast-region {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, calc(100% - 32px));
+  z-index: 30;
+}
+.timer-toast {
+  box-shadow: 0 8px 32px #0004;
+}
+.timer-toast .icon-button {
+  flex: none;
+}
+.settings-popover {
+  width: 300px;
+  max-height: calc(100dvh - 90px);
+  overflow: auto;
+}
+.alert-settings {
+  margin-top: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.alert-settings .secondary {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 8px;
+  font-size: 13px;
+  min-height: 40px;
+}
+.alert-settings .volume-label {
+  display: flex;
+  flex-wrap: wrap;
+}
+.volume-label input {
+  width: 100%;
+  padding: 0;
+  accent-color: var(--accent);
+}
+@media (max-width: 600px) {
+  .timer-reminder {
+    padding: 14px;
+    gap: 10px;
+  }
+  .timer-reminder .secondary {
+    min-height: 40px;
+  }
+  .settings-popover {
+    position: fixed;
+    top: 64px;
+    right: 16px;
+    width: min(320px, calc(100vw - 32px));
+  }
+  .timer-toast {
+    padding: 14px;
+    gap: 10px;
+  }
+  .timer-toast-region {
+    bottom: 16px;
+  }
+}
