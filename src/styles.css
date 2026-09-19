@@ -8,6 +8,7 @@
 .theme-ali .person-card{background:#1c3041;border-color:#c9e6ff1c}.theme-ali .person-card.studying{background:#25445c}
 .theme-ali .action-panel,.theme-ali .summary-panel{background:#192a39;border-color:#c9e6ff1c}
 .theme-ali .avatar{border-color:#8ebcdd;color:#c9e6ff}
+.avatar{overflow:hidden;flex:none}.avatar img{display:block;width:100%;height:100%;object-fit:cover;border-radius:50%}
 .theme-ali .status.is-online i,.theme-ali .activity-dot,.theme-ali .hero-rule span,.theme-ali .progress span{background:#c9e6ff}
 .theme-ali .together-row,.theme-ali .together-row strong,.theme-ali .goal-label button{color:#c9e6ff}
 .theme-ali .primary{background:#c9e6ff;border-color:#c9e6ff;color:#152c40}.theme-ali .primary:hover:not(:disabled){background:#e2f2ff}
