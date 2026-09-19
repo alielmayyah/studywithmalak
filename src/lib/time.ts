@@ -33,14 +33,6 @@ export function calculateOverlap(a: Interval[], b: Interval[]): number {
 }
 
 export function totalTime(intervals: Interval[]): number { return intervals.reduce((sum, i) => sum + i.end - i.start, 0) }
-export function formatClock(ms: number): string {
-  const seconds = Math.floor(Math.max(0, ms) / 1000)
-  return [Math.floor(seconds / 3600), Math.floor(seconds % 3600 / 60), seconds % 60].map(n => String(n).padStart(2, '0')).join(':')
-}
-export function formatShort(ms: number): string {
-  const minutes = Math.floor(Math.max(0, ms) / 60000)
-  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`
-}
 export function formatMinutes(ms: number): string {
   if (ms > 0 && ms < 60000) return '<1 min'
   const minutes = Math.floor(Math.max(0, ms) / 60000)

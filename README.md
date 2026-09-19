@@ -29,4 +29,4 @@ Checks: `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`.
 
 Push to `main`, set GitHub repository variables `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, then select **GitHub Actions** as the Pages build source. The workflow runs checks and deploys `dist`. Vite derives the repository base path from `GITHUB_REPOSITORY`; HashRouter keeps deep links working on static hosting. Add the published `https://OWNER.github.io/REPOSITORY/**` URL to Supabase Auth redirect URLs.
 
-No backend server is required. Live Presence and timer updates require a connected Supabase project. Pomodoro actions run through a database function. Hiding or closing a tab sends a Presence leave; abrupt network loss depends on the server detecting a lost socket.
+No backend server is required. Live Presence and timer updates require a connected Supabase project. Pomodoro actions run through a database function. Connected background tabs remain online; closing a tab sends a Presence leave. Abrupt network loss depends on the server detecting a lost socket.

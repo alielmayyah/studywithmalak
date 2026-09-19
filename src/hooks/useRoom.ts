@@ -59,7 +59,7 @@ export function useRoom(userId: string | null, history = false) {
       .subscribe(status => {
         if (status === 'SUBSCRIBED') {
           setConnected(true)
-          if (document.visibilityState === 'visible') void channel.track({ user_id: userId, online_at: new Date().toISOString() })
+          void channel.track({ user_id: userId, online_at: new Date().toISOString() })
           void reload()
         }
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
@@ -67,8 +67,7 @@ export function useRoom(userId: string | null, history = false) {
         }
       })
     const visibility = () => {
-      if (document.visibilityState === 'hidden') void channel.untrack()
-      else { void channel.track({ user_id: userId, online_at: new Date().toISOString() }); void reload() }
+      if (document.visibilityState === 'visible') { void channel.track({ user_id: userId, online_at: new Date().toISOString() }); void reload() }
     }
     const leaving = () => { void channel.untrack() }
     document.addEventListener('visibilitychange', visibility)
@@ -83,7 +82,7 @@ export function useRoom(userId: string | null, history = false) {
   }, [data?.room.id, userId, reload])
   useEffect(() => {
     const up = () => { setConnected(true); void reload() }
-    const down = () => setConnected(false)
+    const down = () => { setConnected(false); setPresenceReady(false) }
     window.addEventListener('online', up); window.addEventListener('offline', down)
     return () => { window.removeEventListener('online', up); window.removeEventListener('offline', down) }
   }, [reload])

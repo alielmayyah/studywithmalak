@@ -1,119 +1,831 @@
-import { useMemo, useState } from 'react'
-import { format } from 'date-fns'
-import { History, LogOut, WifiOff } from 'lucide-react'
-import { Link } from 'react-router-dom'
-import { useRoom } from '../hooks/useRoom'
-import { useClock } from '../hooks/useClock'
-import { activeIntervals, calculateOverlap, formatCountdown, formatMinutes, localDayRange, totalTime } from '../lib/time'
-import { supabase } from '../lib/supabase'
-import type { PomodoroState, Profile, UserStatus } from '../lib/types'
-import './room.css'
+import { useEffect, useRef, useState } from "react";
+import { format } from "date-fns";
+import {
+  Check,
+  ChevronDown,
+  Heart,
+  History,
+  LogOut,
+  Pause,
+  Play,
+  Settings,
+  WifiOff,
+} from "lucide-react";
+import { Link } from "react-router-dom";
+import { useRoom } from "../hooks/useRoom";
+import type { RoomData } from "../hooks/useRoom";
+import { useClock } from "../hooks/useClock";
+import {
+  activeIntervals,
+  calculateOverlap,
+  formatCountdown,
+  formatMinutes,
+  localDayRange,
+  totalTime,
+} from "../lib/time";
+import { currentOverlap, remaining, isFocusing } from "../lib/pomodoro";
+import { supabase } from "../lib/supabase";
+import { avatarUrl } from "../lib/avatars";
+import type { PomodoroState, Profile, UserStatus } from "../lib/types";
+import "./room.css";
 
 const statuses = [
-  { value: 'focus', label: 'Focusing', emoji: '✦' },
-  { value: 'break', label: 'On a break', emoji: '☕' },
-  { value: 'eating', label: 'Eating', emoji: '🍽️' },
-  { value: 'away', label: 'Away', emoji: '🌙' },
-  { value: 'done', label: 'Done for today', emoji: '✓' },
-] as const
+  { value: "focus", label: "Focus", emoji: "📚" },
+  { value: "break", label: "Break", emoji: "☕" },
+  { value: "eating", label: "Eating", emoji: "🍽️" },
+  { value: "away", label: "Away", emoji: "🚶" },
+  { value: "done", label: "Done", emoji: "😴" },
+] as const;
 
-function remaining(timer: PomodoroState | undefined, now: number) {
-  if (!timer) return 25 * 60000
-  return timer.run_state === 'running' && timer.phase_started_at
-    ? Math.max(0, timer.remaining_ms - (now - Date.parse(timer.phase_started_at)))
-    : timer.remaining_ms
+// The connected page owns persistence; the view receives authoritative snapshots.
+export function RoomPage({ userId }: { userId: string }) {
+  const room = useRoom(userId);
+  const now = useClock();
+  if (room.loading && !room.data)
+    return (
+      <div className="loading-screen" role="status">
+        Opening your room…
+      </div>
+    );
+  if (!room.data)
+    return (
+      <main className="empty-screen">
+        <h1>We couldn’t open the room.</h1>
+        <p>{room.error}</p>
+        <button className="primary" onClick={() => void room.reload()}>
+          Try again
+        </button>
+        <button
+          className="text-button"
+          onClick={() => void supabase.auth.signOut()}
+        >
+          Sign out
+        </button>
+      </main>
+    );
+  if (!room.data.profiles.some((p) => p.id === userId))
+    return (
+      <main className="empty-screen">
+        <h1>Account not set up</h1>
+        <p>Your account needs a profile in this room.</p>
+        <button
+          className="secondary"
+          onClick={() => void supabase.auth.signOut()}
+        >
+          Sign out
+        </button>
+      </main>
+    );
+  return <RoomView {...room} data={room.data} userId={userId} now={now} />;
 }
 
-export function RoomPage({ userId }: { userId: string }) {
-  const { data, online, presenceReady, loading, error, connected, reload } = useRoom(userId)
-  const now = useClock()
-  const [busy, setBusy] = useState(false)
-  const [actionError, setActionError] = useState('')
-  const [preset, setPreset] = useState('25/5')
-  const [focusMinutes, setFocusMinutes] = useState(25)
-  const [breakMinutes, setBreakMinutes] = useState(5)
-  const day = useMemo(() => localDayRange(new Date(now)), [now])
-  const profiles = [...(data?.profiles || [])].sort((a, b) => a.display_name.localeCompare(b.display_name))
-  const me = profiles.find(p => p.id === userId)
-  const ownTimer = data?.timers.find(t => t.user_id === userId)
-  const ownStatus = data?.statuses.find(s => s.user_id === userId)?.status || 'away'
-  const intervals = profiles.map(profile => (data?.sessions || []).filter(s => s.user_id === profile.id).flatMap(s => {
-    const timer = data?.timers.find(t => t.focus_session_id === s.id)
-    const cap = timer?.run_state === 'running' && timer.phase_started_at ? Date.parse(timer.phase_started_at) + timer.remaining_ms : undefined
-    return activeIntervals(s, data?.breaks || [], now, day, cap)
-  }))
-  const totals = intervals.map(totalTime)
-  const together = intervals.length >= 2 ? calculateOverlap(intervals[0], intervals[1]) : 0
-  const bothFocusing = profiles.length === 2 && profiles.every(p => data?.timers.some(t => t.user_id === p.id && t.phase === 'focus' && t.run_state === 'running'))
+type RoomViewProps = {
+  data: RoomData;
+  userId: string;
+  now: number;
+  online: string[];
+  presenceReady: boolean;
+  connected: boolean;
+  error: string;
+  reload: () => Promise<void>;
+};
 
-  async function command(action: string, status?: UserStatus['status']) {
-    if (!data || busy || !connected) return
-    setBusy(true); setActionError('')
-    const { error: cause } = await supabase.rpc('pomodoro_command', {
-      p_room: data.room.id, p_action: action,
-      p_focus_minutes: action === 'start' ? focusMinutes : null,
-      p_break_minutes: action === 'start' ? breakMinutes : null,
-      p_status: status || null,
-    })
-    if (cause) { if (import.meta.env.DEV) console.error(JSON.stringify(cause)); setActionError('Could not save that change. Please try again.') }
-    else await reload()
-    setBusy(false)
+export function RoomView({
+  data,
+  userId,
+  now,
+  online,
+  presenceReady,
+  connected,
+  error,
+  reload,
+}: RoomViewProps) {
+  const [busy, setBusy] = useState(false);
+  const commandPending = useRef(false);
+  const [actionError, setActionError] = useState("");
+  const ownTimer = data.timers.find((t) => t.user_id === userId);
+  const [preset, setPreset] = useState(() => {
+    const f = ownTimer?.focus_minutes ?? 25,
+      b = ownTimer?.break_minutes ?? 5;
+    return f === 25 && b === 5
+      ? "25/5"
+      : f === 50 && b === 10
+        ? "50/10"
+        : "Custom";
+  });
+  const [focusMinutes, setFocusMinutes] = useState(
+    ownTimer?.focus_minutes ?? 25,
+  );
+  const [breakMinutes, setBreakMinutes] = useState(
+    ownTimer?.break_minutes ?? 5,
+  );
+  const [quiet, setQuiet] = useState(
+    () => localStorage.getItem("study-quiet") === "true",
+  );
+  const profiles = [...data.profiles].sort((a, b) =>
+    a.display_name.localeCompare(b.display_name),
+  );
+  const me = profiles.find((p) => p.id === userId)!;
+  const partner = profiles.find((p) => p.id !== userId);
+  const partnerTimer = data.timers.find((t) => t.user_id === partner?.id);
+  const partnerStatus =
+    data.statuses.find((s) => s.user_id === partner?.id)?.status || "away";
+  const day = localDayRange(new Date(now));
+  const intervals = profiles.map((profile) =>
+    data.sessions
+      .filter((s) => s.user_id === profile.id)
+      .flatMap((s) => {
+        const timer = data.timers.find((t) => t.focus_session_id === s.id);
+        const cap =
+          timer?.run_state === "running" && timer.phase_started_at
+            ? Date.parse(timer.phase_started_at) + timer.remaining_ms
+            : undefined;
+        return activeIntervals(s, data.breaks, now, day, cap);
+      }),
+  );
+  const totals = intervals.map(totalTime);
+  const together =
+    intervals.length === 2 ? calculateOverlap(intervals[0], intervals[1]) : 0;
+  const bothFocusing =
+    profiles.length === 2 &&
+    profiles.every((p) =>
+      isFocusing(
+        data.timers.find((t) => t.user_id === p.id),
+        now,
+      ),
+    );
+  const sharedSession = bothFocusing ? currentOverlap(data.timers, now) : 0;
+  const bothOnline =
+    presenceReady &&
+    profiles.length === 2 &&
+    profiles.every((p) => online.includes(p.id));
+  const idle = !ownTimer || ownTimer.phase === "idle";
+  const paused = ownTimer?.run_state === "paused";
+  const onBreak = ownTimer?.phase === "break";
+  const timeLeft = idle ? focusMinutes * 60000 : remaining(ownTimer, now);
+  const duration =
+    (idle
+      ? focusMinutes
+      : onBreak
+        ? ownTimer.break_minutes
+        : ownTimer.focus_minutes) * 60000;
+  const progress =
+    duration > 0 ? Math.max(0, Math.min(1, timeLeft / duration)) : 0;
+  const validDuration =
+    Number.isInteger(focusMinutes) &&
+    focusMinutes >= 1 &&
+    focusMinutes <= 180 &&
+    Number.isInteger(breakMinutes) &&
+    breakMinutes >= 1 &&
+    breakMinutes <= 60;
+  const partnerName = partner?.display_name || "Your partner";
+  const partnerFocusing = isFocusing(partnerTimer, now);
+  const context = !connected
+    ? "Your timers are saved. Reconnecting…"
+    : !presenceReady
+      ? "Connecting to your shared room…"
+      : partner && !online.includes(partner.id)
+        ? `${partnerName} is offline. Your space is ready.`
+        : partnerFocusing
+          ? `${partnerName} is focusing. ${idle ? `Join ${partnerName}.` : "Find your rhythm."}`
+          : partnerStatus === "break"
+            ? onBreak
+              ? "Both taking a break."
+              : `${partnerName} is taking a break ☕`
+            : partnerStatus === "eating"
+              ? `${partnerName} is having a bite 🍽️`
+              : partnerStatus === "done"
+                ? `${partnerName} is done for today.`
+                : together > 0
+                  ? "A little time, well spent together."
+                  : "Start when you’re both ready.";
+
+  async function command(action: string, status?: UserStatus["status"]) {
+    if (commandPending.current || !connected) return;
+    commandPending.current = true;
+    setBusy(true);
+    setActionError("");
+    try {
+      const run = async (next: string) => {
+        const { error: cause } = await supabase.rpc("pomodoro_command", {
+          p_room: data.room.id,
+          p_action: next,
+          p_focus_minutes:
+            next === "start"
+              ? action === "back_to_focus"
+                ? (ownTimer?.focus_minutes ?? focusMinutes)
+                : focusMinutes
+              : null,
+          p_break_minutes:
+            next === "start"
+              ? action === "back_to_focus"
+                ? (ownTimer?.break_minutes ?? breakMinutes)
+                : breakMinutes
+              : null,
+          p_status: status || null,
+        });
+        if (cause) throw cause;
+      };
+      if (action === "back_to_focus") {
+        await run("skip_break");
+        await run("start");
+      } else await run(action);
+      await reload();
+    } catch {
+      setActionError("Could not save that change. Please try again.");
+      await reload();
+    } finally {
+      commandPending.current = false;
+      setBusy(false);
+    }
   }
   function selectPreset(value: string) {
-    setPreset(value)
-    if (value === '25/5') { setFocusMinutes(25); setBreakMinutes(5) }
-    if (value === '50/10') { setFocusMinutes(50); setBreakMinutes(10) }
+    setPreset(value);
+    if (value === "25/5") {
+      setFocusMinutes(25);
+      setBreakMinutes(5);
+    }
+    if (value === "50/10") {
+      setFocusMinutes(50);
+      setBreakMinutes(10);
+    }
   }
+  function person(profile: Profile) {
+    const index = profiles.indexOf(profile);
+    return (
+      <Person
+        key={profile.id}
+        profile={profile}
+        online={presenceReady && connected ? online.includes(profile.id) : null}
+        status={
+          data.statuses.find((s) => s.user_id === profile.id)?.status || "away"
+        }
+        timer={data.timers.find((t) => t.user_id === profile.id)}
+        isMe={profile.id === userId}
+        total={totals[index] || 0}
+        onStatus={(status) => void command("status", status)}
+        busy={busy || !connected}
+        now={now}
+      />
+    );
+  }
+  const activePreset = idle
+    ? preset
+    : ownTimer.focus_minutes === 25 && ownTimer.break_minutes === 5
+      ? "25/5"
+      : ownTimer.focus_minutes === 50 && ownTimer.break_minutes === 10
+        ? "50/10"
+        : "Custom";
 
-  if (loading && !data) return <div className="loading-screen">Opening your room…</div>
-  if (!data) return <main className="empty-screen"><h1>We couldn’t open the room.</h1><p>{error}</p><button className="primary" onClick={() => void reload()}>Try again</button><button className="text-button" onClick={() => void supabase.auth.signOut()}>Sign out</button></main>
-  if (!me) return <main className="empty-screen"><h1>Account not set up</h1><p>Your account needs a profile in this room.</p><button onClick={() => void supabase.auth.signOut()}>Sign out</button></main>
-
-  return <div className={`app-shell room-shell ${me.display_name === 'Malak' ? 'theme-malak' : 'theme-ali'}`}>
-    <header className="site-header">
-      <Link className="brand" to="/">ALI <span>×</span> MALAK</Link>
-      <div className="header-center">{format(new Date(now), 'EEEE, MMMM d')}</div>
-      <nav aria-label="Main navigation"><Link className="icon-button" to="/history" aria-label="Study history" title="History"><History size={18}/></Link><button className="icon-button" onClick={() => void supabase.auth.signOut()} aria-label="Sign out" title="Sign out"><LogOut size={18}/></button></nav>
-    </header>
-    {!connected && <div className="connection" role="status"><WifiOff size={16}/> Connection lost. Reconnecting…</div>}
-    {error && <div className="connection" role="alert">{error} <button onClick={() => void reload()}>Retry</button></div>}
-    <main className="room-main">
-      <section className="together" aria-label="Together today">
-        <div className="eyebrow">OUR STUDY ROOM</div>
-        <h1>We showed up together.</h1>
-        <p>{bothFocusing ? 'You are focusing together right now.' : 'A quiet place to make time for each other.'}</p>
-        <div className="together-total"><strong>{formatMinutes(together)}</strong><span>together today</span></div>
-      </section>
-      <section className="people-grid" aria-label="People in the room">
-        {profiles.map((profile, index) => <Person key={profile.id} profile={profile} online={presenceReady ? online.includes(profile.id) : null} status={data.statuses.find(s => s.user_id === profile.id)?.status || 'away'} timer={data.timers.find(t => t.user_id === profile.id)} isMe={profile.id === userId} total={totals[index] || 0} onStatus={status => void command('status', status)} busy={busy || !connected} now={now}/>)}
-      </section>
-      <section className="timer-area" aria-label="Your focus timer">
-        <div className="timer-info"><div className="eyebrow">YOUR TIMER</div><h2>{ownTimer?.phase === 'break' ? 'Take a breath.' : ownTimer?.phase === 'focus' ? 'Stay with it.' : 'Ready when you are.'}</h2><p>{ownTimer?.phase === 'break' ? 'Your break ends automatically.' : ownTimer?.run_state === 'paused' ? 'Paused. Pick up where you left off.' : ownTimer?.phase === 'focus' ? 'One moment at a time.' : 'Choose a rhythm and begin.'}</p></div>
-        <div className="timer-clock"><span>{ownTimer?.phase === 'break' ? 'BREAK' : 'FOCUS'}</span><strong>{formatCountdown(ownTimer?.phase === 'idle' || !ownTimer ? focusMinutes * 60000 : remaining(ownTimer, now))}</strong></div>
-        <div className="timer-controls">
-          {(!ownTimer || ownTimer.phase === 'idle') && <>
-            <div className="presets" aria-label="Timer length">{['25/5', '50/10', 'Custom'].map(value => <button key={value} className={preset === value ? 'selected' : ''} onClick={() => selectPreset(value)}>{value === 'Custom' ? value : value.replace('/', ' / ')}</button>)}</div>
-            {preset === 'Custom' && <div className="custom-times"><label>Focus <input type="number" min="1" max="180" value={focusMinutes} onChange={e => setFocusMinutes(Number(e.target.value))}/> min</label><label>Break <input type="number" min="1" max="60" value={breakMinutes} onChange={e => setBreakMinutes(Number(e.target.value))}/> min</label></div>}
-            <button className="primary" disabled={busy || !connected || focusMinutes < 1 || focusMinutes > 180 || breakMinutes < 1 || breakMinutes > 60} onClick={() => void command('start')}>Start focus</button>
-          </>}
-          {ownTimer?.phase === 'focus' && <><button className="primary" disabled={busy || !connected} onClick={() => void command(ownTimer.run_state === 'paused' ? 'resume' : 'pause')}>{ownTimer.run_state === 'paused' ? 'Resume' : 'Pause'}</button><button className="secondary" disabled={busy || !connected} onClick={() => void command('break')}>Start break</button><button className="text-button" disabled={busy || !connected} onClick={() => void command('end')}>End</button></>}
-          {ownTimer?.phase === 'break' && <><button className="primary" disabled={busy || !connected} onClick={() => void command('skip_break')}>Finish break</button><button className="text-button" disabled={busy || !connected} onClick={() => void command('end')}>End</button></>}
+  return (
+    <div
+      className={`app-shell room-shell theme-${me.display_name.toLowerCase()} ${quiet ? "quiet-room" : ""}`}
+    >
+      <header className="site-header">
+        <Link className="brand" to="/">
+          ALI <span>×</span> MALAK
+        </Link>
+        <time
+          className="header-center"
+          dateTime={format(new Date(now), "yyyy-MM-dd")}
+        >
+          {format(new Date(now), "EEEE, MMMM d")}
+        </time>
+        <nav aria-label="Main navigation">
+          <Link
+            className="icon-button"
+            to="/history"
+            aria-label="Study history"
+            title="History"
+          >
+            <History size={18} />
+          </Link>
+          <RoomSettings
+            quiet={quiet}
+            setQuiet={(value) => {
+              setQuiet(value);
+              localStorage.setItem("study-quiet", String(value));
+            }}
+          />
+          <button
+            className="icon-button"
+            onClick={() => void supabase.auth.signOut()}
+            aria-label="Sign out / switch user"
+            title="Switch user"
+          >
+            <LogOut size={18} />
+          </button>
+        </nav>
+      </header>
+      {!connected && (
+        <div className="connection" role="status">
+          <WifiOff size={16} /> Reconnecting… Your timer is saved.
         </div>
-      </section>
-      <div className="today-line" aria-label="Focus time today"><span>TODAY</span>{profiles.map((profile, index) => <span key={profile.id}>{profile.display_name} <strong>{formatMinutes(totals[index] || 0)}</strong></span>)}<span>Together <strong>{formatMinutes(together)}</strong></span></div>
-      {actionError && <p className="error room-error" role="alert">{actionError}</p>}
-      {ownStatus === 'done' && <div className="sr-only">Done for today</div>}
-    </main>
-  </div>
+      )}
+      {error && (
+        <div className="connection" role="alert">
+          {error} <button onClick={() => void reload()}>Retry</button>
+        </div>
+      )}
+      <main className="room-main">
+        <section className="room-heading">
+          <div className="eyebrow">OUR STUDY ROOM</div>
+          <h1>
+            {bothFocusing
+              ? "Together now."
+              : bothOnline
+                ? "Here together."
+                : "Your quiet corner."}
+          </h1>
+          <p>Every minute together counts.</p>
+        </section>
+        <section className="live-room" aria-label="Your shared study room">
+          {profiles[0] && person(profiles[0])}
+          <div
+            className={`together-hero ${bothFocusing ? "active" : ""}`}
+            aria-label="Together time"
+          >
+            <div className="together-halo" aria-hidden="true" />
+            <div className="together-label">
+              {bothFocusing && <i aria-hidden="true" />}
+              {bothFocusing ? "TOGETHER NOW" : "TOGETHER TODAY"}
+            </div>
+            <strong className="together-value">
+              {bothFocusing
+                ? formatCountdown(sharedSession)
+                : formatMinutes(together)}
+            </strong>
+            <p className="together-caption">
+              {bothFocusing
+                ? `Today · ${formatMinutes(together)} together`
+                : context}
+            </p>
+            <div className="pair-chip">
+              <span className="mini-avatars" aria-hidden="true">
+                <img src={avatarUrl("Ali")} alt="" />
+                <img src={avatarUrl("Malak")} alt="" />
+              </span>
+              {bothFocusing
+                ? "Both active"
+                : bothOnline
+                  ? "In good company"
+                  : "A space for two"}
+            </div>
+            {idle && partnerFocusing && (
+              <button
+                className="primary join-button"
+                disabled={busy || !connected || !validDuration}
+                onClick={() => void command("start")}
+              >
+                <Play size={13} /> Start focus
+              </button>
+            )}
+          </div>
+          {profiles[1] && person(profiles[1])}
+        </section>
+        <section
+          className="timer-panel"
+          aria-labelledby="pomodoro-heading"
+          id="pomodoro"
+        >
+          <div className="timer-panel-heading">
+            <h2 className="eyebrow" id="pomodoro-heading">
+              YOUR POMODORO
+            </h2>
+            <span className="timer-owner">
+              <img src={avatarUrl(me.display_name)} alt="" />
+              {me.display_name}’s time
+            </span>
+          </div>
+          <div className="timer-content">
+            <div
+              className={`timer-dial ${onBreak ? "is-break" : ""}`}
+              aria-label={`${paused ? "Paused" : onBreak ? "Break" : idle ? "Ready" : "Focus"} timer: ${formatCountdown(timeLeft)} remaining`}
+            >
+              <svg viewBox="0 0 250 250" aria-hidden="true">
+                <circle className="ring-track" cx="125" cy="125" r="115" />
+                <circle
+                  className="ring-progress"
+                  cx="125"
+                  cy="125"
+                  r="115"
+                  strokeDasharray={2 * Math.PI * 115}
+                  strokeDashoffset={2 * Math.PI * 115 * (1 - progress)}
+                />
+              </svg>
+              <div className="dial-copy">
+                <span className="dial-emoji" aria-hidden="true">
+                  {onBreak ? "☕" : "📚"}
+                </span>
+                <span className="dial-label">
+                  {paused
+                    ? "PAUSED"
+                    : onBreak
+                      ? "BREAK"
+                      : idle
+                        ? "YOUR NEXT FOCUS"
+                        : timeLeft === 0
+                          ? "COMPLETED"
+                          : "FOCUS"}
+                </span>
+                <strong>{formatCountdown(timeLeft)}</strong>
+                <small>
+                  {idle
+                    ? "Ready when you are."
+                    : paused
+                      ? "Take your time."
+                      : timeLeft === 0
+                        ? "Syncing your next phase…"
+                        : "remaining"}
+                </small>
+              </div>
+            </div>
+            <div className="timer-controls">
+              <div className="eyebrow">TIMER PRESETS</div>
+              <div
+                className="presets"
+                role="group"
+                aria-label="Focus and break duration"
+              >
+                {["25/5", "50/10", "Custom"].map((value) => (
+                  <button
+                    key={value}
+                    disabled={!idle || busy}
+                    aria-pressed={activePreset === value}
+                    className={activePreset === value ? "selected" : ""}
+                    onClick={() => selectPreset(value)}
+                  >
+                    {value.replace("/", " / ")}
+                  </button>
+                ))}
+              </div>
+              {idle && preset === "Custom" && (
+                <div className="custom-times">
+                  <label>
+                    Focus minutes
+                    <input
+                      type="number"
+                      min="1"
+                      max="180"
+                      step="1"
+                      value={focusMinutes || ""}
+                      onChange={(e) => setFocusMinutes(Number(e.target.value))}
+                    />
+                  </label>
+                  <label>
+                    Break minutes
+                    <input
+                      type="number"
+                      min="1"
+                      max="60"
+                      step="1"
+                      value={breakMinutes || ""}
+                      onChange={(e) => setBreakMinutes(Number(e.target.value))}
+                    />
+                  </label>
+                </div>
+              )}
+              <p className="timer-hint">
+                {idle
+                  ? "A little focus. A little rest. Your own rhythm."
+                  : paused
+                    ? "Your progress is saved. Pick up where you left off."
+                    : onBreak
+                      ? "Rest your eyes. Come back when you’re ready."
+                      : `${ownTimer.focus_minutes} minutes of focus, then ${ownTimer.break_minutes} minutes to breathe.`}
+              </p>
+              <div className="timer-actions">
+                <button
+                  className="primary"
+                  disabled={busy || !connected || !validDuration}
+                  onClick={() =>
+                    void command(
+                      idle
+                        ? "start"
+                        : onBreak
+                          ? "back_to_focus"
+                          : paused
+                            ? "resume"
+                            : "pause",
+                    )
+                  }
+                >
+                  {!idle && !onBreak && !paused ? (
+                    <Pause size={16} />
+                  ) : (
+                    <Play size={16} />
+                  )}{" "}
+                  {busy
+                    ? "Saving…"
+                    : idle
+                      ? "Start focus"
+                      : onBreak
+                        ? "Resume focus"
+                        : paused
+                          ? "Resume focus"
+                          : "Pause"}
+                </button>
+                {!idle && (
+                  <button
+                    className="secondary"
+                    disabled={busy || !connected}
+                    onClick={() => void command("end")}
+                  >
+                    End session
+                  </button>
+                )}
+              </div>
+              {!idle && !onBreak && (
+                <button
+                  className="text-button break-action"
+                  disabled={busy || !connected}
+                  onClick={() => void command("break")}
+                >
+                  Take a break
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
+        {actionError && (
+          <p className="error room-error" role="alert">
+            {actionError}
+          </p>
+        )}
+        <section className="today-strip" aria-label="Focus time today">
+          <h2 className="eyebrow">TODAY</h2>
+          {[me, partner]
+            .filter((p): p is Profile => Boolean(p))
+            .map((profile) => (
+              <div
+                className={`today-stat ${profile.display_name.toLowerCase()}`}
+                key={profile.id}
+              >
+                <span>
+                  {profile.id === userId
+                    ? "YOU"
+                    : profile.display_name.toUpperCase()}
+                </span>
+                <strong>
+                  {formatMinutes(totals[profiles.indexOf(profile)] || 0)}
+                </strong>
+              </div>
+            ))}
+          <div className="today-stat pair">
+            <span>
+              <Heart aria-hidden="true" /> TOGETHER
+            </span>
+            <strong>{formatMinutes(together)}</strong>
+          </div>
+        </section>
+        <footer className="room-footer">Same goals. Brighter days.</footer>
+      </main>
+    </div>
+  );
 }
 
-function Person({ profile, online, status, timer, isMe, total, onStatus, busy, now }: { profile: Profile; online: boolean | null; status: UserStatus['status']; timer?: PomodoroState; isMe: boolean; total: number; onStatus: (status: UserStatus['status']) => void; busy: boolean; now: number }) {
-  const [open, setOpen] = useState(false)
-  const current = statuses.find(s => s.value === status) || statuses[3]
-  const avatar = profile.display_name === 'Ali' ? 'ali.webp' : 'malak.webp'
-  return <article className={`person-card ${isMe ? 'is-me' : ''}`}>
-    <div className="person-top"><div className="avatar"><img src={`${import.meta.env.BASE_URL}avatars/${avatar}`} alt=""/></div><div className="person-name"><h2>{profile.display_name}{isMe && <span>YOU</span>}</h2><div className={`status ${online ? 'is-online' : ''}`}><i/>{online === null ? 'Connecting…' : online ? 'Online' : 'Offline'}</div></div></div>
-    <div className="person-bottom"><div className="status-wrap">{isMe ? <><button className="person-status" onClick={() => setOpen(!open)} aria-expanded={open} aria-label="Change your status">{current.emoji} {current.label} <span>⌄</span></button>{open && <div className="status-menu">{statuses.map(item => <button key={item.value} disabled={busy} onClick={() => { onStatus(item.value); setOpen(false) }}>{item.emoji} {item.label}</button>)}</div>}</> : <div className="person-status">{current.emoji} {current.label}</div>}</div><div className="person-duration"><small>FOCUS TODAY</small><strong>{formatMinutes(total)}</strong></div></div>
-    {timer?.phase !== 'idle' && timer && <div className="person-timer">{timer.phase === 'break' ? 'On a break' : timer.run_state === 'paused' ? 'Focus paused' : 'Focusing'} · {formatCountdown(remaining(timer, now))}</div>}
-  </article>
+function Person({
+  profile,
+  online,
+  status,
+  timer,
+  isMe,
+  total,
+  onStatus,
+  busy,
+  now,
+}: {
+  profile: Profile;
+  online: boolean | null;
+  status: UserStatus["status"];
+  timer?: PomodoroState;
+  isMe: boolean;
+  total: number;
+  onStatus: (status: UserStatus["status"]) => void;
+  busy: boolean;
+  now: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => {
+      if (!wrap.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", outside);
+    wrap.current
+      ?.querySelector<HTMLButtonElement>('[aria-checked="true"]')
+      ?.focus();
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [open]);
+  const current = statuses.find((s) => s.value === status) || statuses[3];
+  const active = timer && timer.phase !== "idle";
+  return (
+    <article
+      className={`person-card person-${profile.display_name.toLowerCase()} ${isMe ? "is-me" : ""}`}
+      aria-label={`${profile.display_name}${isMe ? ", you" : ""}`}
+    >
+      <div className="avatar">
+        <img
+          src={avatarUrl(profile.display_name)}
+          alt={`${profile.display_name}’s avatar`}
+        />
+        <i
+          className={`presence-dot ${online ? "online" : ""}`}
+          aria-hidden="true"
+        />
+      </div>
+      <div className="person-name">
+        <h2>
+          {profile.display_name}
+          {isMe && <span>(you)</span>}
+        </h2>
+        <div className="presence-label">
+          {online === null ? "Connecting…" : online ? "Online" : "Offline"}
+        </div>
+      </div>
+      <div
+        className="status-wrap"
+        ref={wrap}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget))
+            setOpen(false);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setOpen(false);
+            trigger.current?.focus();
+          }
+          if (
+            open &&
+            ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)
+          ) {
+            event.preventDefault();
+            const options = Array.from(
+              wrap.current?.querySelectorAll<HTMLButtonElement>(
+                '[role="menuitemradio"]',
+              ) || [],
+            );
+            const index = options.indexOf(
+              document.activeElement as HTMLButtonElement,
+            );
+            options[
+              event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? options.length - 1
+                  : (index +
+                      (event.key === "ArrowDown" ? 1 : -1) +
+                      options.length) %
+                    options.length
+            ]?.focus();
+          }
+        }}
+      >
+        {isMe ? (
+          <>
+            <button
+              ref={trigger}
+              className="person-status"
+              disabled={busy}
+              onClick={() => setOpen(!open)}
+              aria-expanded={open}
+              aria-haspopup="menu"
+              aria-label={`Change your status, currently ${current.label}`}
+            >
+              <span aria-hidden="true">{current.emoji}</span>
+              {current.label}
+              <ChevronDown size={12} />
+            </button>
+            {open && (
+              <div className="status-menu" role="menu" aria-label="Your status">
+                {statuses.map((item) => (
+                  <button
+                    role="menuitemradio"
+                    aria-checked={status === item.value}
+                    key={item.value}
+                    disabled={busy}
+                    onClick={() => {
+                      onStatus(item.value);
+                      setOpen(false);
+                      trigger.current?.focus();
+                    }}
+                  >
+                    <span aria-hidden="true">{item.emoji}</span>
+                    {item.label}
+                    {status === item.value && <Check size={14} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="person-status">
+            <span aria-hidden="true">{current.emoji}</span>
+            {current.label}
+          </div>
+        )}
+      </div>
+      <div className="person-stats">
+        <div>
+          <strong>
+            {active ? formatCountdown(remaining(timer, now)) : "Ready"}
+          </strong>
+          <small>
+            {active
+              ? timer.run_state === "paused"
+                ? "focus paused"
+                : timer.phase === "break"
+                  ? "break remaining"
+                  : "focus remaining"
+              : "no active timer"}
+          </small>
+        </div>
+        <div>
+          <strong>{formatMinutes(total)}</strong>
+          <small>focus today</small>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function RoomSettings({
+  quiet,
+  setQuiet,
+}: {
+  quiet: boolean;
+  setQuiet: (value: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => {
+      if (!wrap.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", outside);
+    wrap.current?.querySelector("input")?.focus();
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [open]);
+  return (
+    <div
+      className="settings-wrap"
+      ref={wrap}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          setOpen(false);
+          trigger.current?.focus();
+        }
+      }}
+    >
+      <button
+        ref={trigger}
+        className="icon-button"
+        aria-label="Room settings"
+        aria-expanded={open}
+        aria-controls="room-settings"
+        onClick={() => setOpen(!open)}
+        title="Settings"
+      >
+        <Settings size={18} />
+      </button>
+      {open && (
+        <div className="settings-popover" id="room-settings">
+          <h2>Make yourself at home.</h2>
+          <p>A small preference for this device.</p>
+          <label>
+            <input
+              type="checkbox"
+              checked={quiet}
+              onChange={(e) => setQuiet(e.target.checked)}
+            />{" "}
+            Keep the background plain
+          </label>
+          <a
+            href="#pomodoro"
+            onClick={(event) => {
+              event.preventDefault();
+              setOpen(false);
+              document
+                .getElementById("pomodoro")
+                ?.scrollIntoView({
+                  behavior: matchMedia("(prefers-reduced-motion: reduce)")
+                    .matches
+                    ? "instant"
+                    : "smooth",
+                });
+            }}
+          >
+            Change your timer below ↓
+          </a>
+        </div>
+      )}
+    </div>
+  );
 }
